@@ -60,7 +60,7 @@ T3. 주문 취소 흐름
 
 ---
 
-## 5. 화면 설계 / 와이어프레임 
+## 5. 화면 설계 / 와이어프레임 [wireframe and diagram.md](./wireframe and diagram.md) 참조
 
 Streamlit 단일 페이지. 좌(입력) → 우(결과) 흐름.
 
@@ -94,7 +94,7 @@ Streamlit 단일 페이지. 좌(입력) → 우(결과) 흐름.
 
 ---
 
-## 6. 클래스 다이어그램 
+## 6. 클래스 다이어그램 [wireframe and diagram.md](./wireframe and diagram.md) 참조
 
 ```mermaid
 classDiagram
@@ -137,7 +137,7 @@ classDiagram
 
 ---
 
-## 7. 시퀀스 다이어그램 
+## 7. 시퀀스 다이어그램 [wireframe and diagram.md](./wireframe and diagram.md) 참조
 
 ### 7.1 완전 체결 시나리오
 
