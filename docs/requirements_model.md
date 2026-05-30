@@ -61,7 +61,7 @@ Mini-OrderBook은 코인 자동매매에서 백엔드(전략·주문 라우팅)�
 
 ## 3. 유스케이스 다이어그램
 
-[Use Case Diagram](./usecase_diagram.png)
+[Use Case Diagram](../reports/usecase_diagram.png)
 
 - 실선: 연관(association) — 액터와 핵심 유스케이스 연결
 - 점선 화살표 + 스테레오타입: «include» 포함 / «extend» 확장
