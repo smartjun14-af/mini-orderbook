@@ -54,7 +54,7 @@
 
 ### 2.4 아키텍처 다이어그램
 
-![Architecture Diagram](reports/architecture_diagram.png)
+![아키텍쳐](../reports/아키텍쳐.png)
 
 ---
 
