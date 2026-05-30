@@ -1,35 +1,36 @@
 # Mini-OrderBook 형상관리 및 유지보수
 
-
-**관련 문서**: [PROCESS.md](./PROCESS.md), [DESIGN.md](./DESIGN.md), [ARCHITECTURE.md](./ARCHITECTURE.md)
+**관련 문서**: [process.md](./process.md), [Design.md](./Design.md), [architecture.md](./architecture.md), [requirements_model.md](./requirements_model.md)
 **대상 형상관리 시스템**: GitHub — `smartjun14-af/mini-orderbook` (Public)
 
 ---
 
 ## 0. 본 문서 범위
 
-형상관리 절차와 유지보수 유형을, 본 프로젝트가 GitHub에서 실제로 수행한 활동(커밋·이슈·브랜치·Discussions)에 매핑하여 기록한다. 형상관리는 개념 설명에 그치지 않고 실제 repo 활동을 증거로 제시한다.
+형상관리 절차와 유지보수 유형을, 본 프로젝트가 GitHub에서 실제로 수행한 활동(커밋·이슈·Discussions)에 매핑하여 기록한다. 형상관리는 개념 설명에 그치지 않고 실제 repo 활동을 증거로 제시한다.
 
-
-> 본 프로젝트 repo 현황(작성 시점): **59 commits · 1 branches · 7 issues · Discussions·Projects 활성 · MIT License**
+> repo 현황(작성 시점): **59 commits · 7 issues · Discussions·Projects 활성 · MIT License**
+> 본 프로젝트는 **브랜치 분리 없이 단일 main 브랜치에 직접 커밋**하는 방식으로 진행했다(§3·§7 참조).
 
 ---
 
 ## 1. 형상 식별 (Configuration Identification)
 
-### 1.1 형상 항목 (Configuration Items)
+### 1.1 형상 항목 (Configuration Items) — 실제 repo 구조
 
 | 분류 | 형상 항목 | 위치 |
 |---|---|---|
-| 코드 | `orderbook.py`(매칭 엔진), `app.py`(UI), `test_orderbook.py`(테스트) | repo 루트 / 산출물 |
-| 요구·설계 문서 | `SRS.md`, `REQUIREMENTS_MODEL.md`, `DESIGN.md`, `ARCHITECTURE.md`, `PROCESS.md` | `docs/` |
-| 다이어그램 | 유스케이스·클래스·시퀀스·아키텍처·변경제어 다이어그램 | `docs/screenshots/` |
-| 교훈·보고 | `LESSONS_LEARNED.md`, `DEVLOG.md`, GPT-SRS 비교 | `lessons learned/`, `reports/` |
-| 환경·설정 | `requirements.txt`, `.gitignore`, `LICENSE`(MIT), `README.md` | repo 루트 |
+| 소스 코드 | `orderbook.py`(매칭 엔진), `requirements.txt` | 루트 |
+| 코드 산출물 | UI·테스트 등 코드 산출물 | `산출물/` |
+| 프로세스 문서 | `SRS.md`, `requirements_model.md`, `Design.md`, `architecture.md`, `process.md`, `coding.md`, `maintenance.md` | `docs/` |
+| 다이어그램·자료 | `usecase_diagram.PNG`, `아키텍쳐.PNG`, `changecontrol_diagram.PNG`, `wireframe and diagram.zip` | `reports/` |
+| AI 비교 자료 | `gpt-generated-SRS.md`, `gptSRS.PNG` | `reports/` |
+| 작업별 교훈 | SRS · 요구 모델링 · 설계 · 매칭 엔진 구현 · 단위 테스트 · 프로세스 모델 정의 · 아키텍쳐 (7개) | `lessons learned/` |
+| 설정·기타 | `README.md`, `LICENSE`(MIT), `.gitignore` | 루트 |
 
-### 1.2 베이스라인 (Baseline)
+### 2.2 베이스라인 (Baseline)
 
-베이스라인은 "형상 항목의 집합으로, 프로젝트의 중요한 상태를 정의하고 이후 변경 제어의 기준이 되는 것"으로 정의된다. 본 프로젝트의 베이스라인은 다음과 같다.
+강의록은 베이스라인을 "형상 항목의 집합으로, 프로젝트의 중요한 상태를 정의하고 이후 변경 제어의 기준이 되는 것"으로 정의한다. 본 프로젝트의 베이스라인은 다음과 같다.
 
 | 베이스라인 | 정의 시점 | 내용 |
 |---|---|---|
@@ -37,28 +38,28 @@
 | 설계 베이스라인 | DESIGN v0.2 | 클래스/시퀀스 다이어그램, UI 설계 고정 |
 | 코드 베이스라인 | 단위 테스트 100% 통과 시점 | 매칭 엔진 + 테스트가 함께 검증된 상태 |
 
-> 각 베이스라인 이후의 변경은 §3의 절차를 거친다. (개선점: 현재 0 tags이므로, 베이스라인을 git tag로 찍으면 더 명확해진다 → §7)
+> 개선점: 현재 0 tags이므로, 베이스라인을 `git tag`로 찍으면 "이 시점 기준"을 더 명확히 가리킬 수 있다(§7).
 
 ---
 
-## 2. 형상 변경 제어 (Change Control)
+## 3. 형상 변경 제어 (Change Control)
 
-강의록의 변경 제어 절차(변경 이유 파악 → 변경 분석 → 변경 제안 준비 → 평가 → 변경 추가)를 GitHub 워크플로우에 매핑했다.
+본 프로젝트는 브랜치/PR 없이 **단일 main에 직접 커밋**했다. 강의록의 변경 제어 절차(변경 이유 파악 → 변경 작성 → 평가 → 변경 추가)를 이 단순한 흐름에 매핑하면 다음과 같다.
 
-![Change Control Flow](reports/changecontrol_diagram.png)
+![형상 변경 제어 흐름](../reports/changecontrol_diagram.PNG)
 
-| 절차 | GitHub 대응 | 본 프로젝트 사례 |
+| 절차 | 본 프로젝트 대응 | 사례 |
 |---|---|---|
 | 변경 이유 파악 | **Issue** 생성 | US 7개를 Issue로 등록(현재 7 issues), 결함·개선 요청 등록 |
-| 변경 제안 준비 | **Commit** + 메시지 | 변경 이유를 커밋 메시지로 기록 (예: "Rename .py to orderbook.py", "Create 아키텍쳐(전체구조)설계") |
-| 변경 제안 평가 | **Pull Request** | 변경을 main에 병합하기 전 검토 |
-| 변경 추가 | **Merge to main** | 검토 통과 후 반영 → 새 상태가 다음 베이스라인의 기준 |
+| 변경 작성 | **로컬 작업·수정** | 코드/문서를 로컬에서 수정 |
+| 변경 평가(정확성) | **단위 테스트 통과** | 테스트 100% 통과로 변경의 정확성 확인 (= 형상 감사 게이트, §5) |
+| 변경 추가·반영 | **Commit → main** | main에 직접 커밋, 변경 이유를 메시지로 기록 (예: "Rename .py to orderbook.py", "Create 아키텍쳐(전체구조)설계") |
 
-변경 이유(결함, 운영 요구 변경, 사용자 개선 요구, 일정 변경)는 본 프로젝트에서 주로 **결함**(리팩토링 회귀)과 **개선 요구**(리팩토링·파일 정리)로 나타났다.
+변경 이유(결함, 운영 요구 변경, 사용자 개선 요구, 일정 변경) 중 본 프로젝트에서는 주로 **결함**(리팩토링 회귀)과 **개선 요구**(리팩토링·파일 정리)가 나타났다.
 
 ---
 
-## 3. 형상 상태 보고 (Status Accounting)
+## 4. 형상 상태 보고 (Status Accounting)
 
 형상 항목과 변경의 상태를 추적·보고하는 활동이다.
 
@@ -67,28 +68,29 @@
 | **커밋 히스토리 (59건)** | 모든 변경의 시간순 이력 — 무엇이 언제 바뀌었는지 |
 | **Issues 상태 (open/closed)** | 작업 단위별 진행 상태 |
 | **Projects 보드** | 작업 상태를 칸반 형태로 시각화 |
-| **DEVLOG.md** | 날짜별 한 일·토의·다음 할 일 (사람이 읽는 상태 보고) |
+| **Discussion** | 날짜별 한 일·토의·다음 할 일 |
 | **README.md** | 프로젝트 현재 상태와 실행 방법 |
 
-> 커밋을 기능 단위로 잘게 쪼갠 덕분에, 상태 보고가 "큰 변경 하나"가 아니라 "추적 가능한 작은 변경들"로 남았다.
 
 ---
 
-## 4. 형상 감사 (Configuration Audit)
+## 5. 형상 감사 (Configuration Audit)
 
-강의록은 형상 감사를 "형상 항목 검토(업데이트되어도 차이가 없음을 보장)"와 "형상 항목 확인(올바른 문제를 해결했는지 정확성 체크)"로 정의한다.
+형상 감사를 "형상 항목 검토(업데이트되어도 차이가 없음을 보장)"와 "형상 항목 확인(올바른 문제를 해결했는지 정확성 체크)"로 정의한다.
 
 | 감사 활동 | 본 프로젝트 적용 |
 |---|---|
-| 형상 항목 **검토** | 코드(클래스·함수)가 설계 베이스라인(DESIGN 클래스 다이어그램)과 일치하는지 대조 |
+| 형상 항목 **검토** | 코드(클래스·함수)가 설계 베이스라인(Design 클래스 다이어그램)과 일치하는지 대조 |
 | 형상 항목 **확인** | **단위 테스트 100% 통과** = "올바른 문제를 해결했는지 정확성 체크"의 직접 증거 |
-| 일관성 감사 | 유스케이스 명세 ↔ 시퀀스 다이어그램 일치 점검(REQUIREMENTS_MODEL §5) |
+| 일관성 감사 | 유스케이스 명세 ↔ 시퀀스 다이어그램 일치 점검(requirements_model §5) |
+
+→ 즉 본 프로젝트에서 **테스트 통과가 변경을 main(베이스라인)에 반영하기 전의 형상 감사 게이트** 역할을 했다(§3 다이어그램의 주황 박스).
 
 ---
 
-## 5. 유지보수 유형 적용
+## 6. 유지보수 유형 적용
 
-본 프로젝트는 신규 개발이라 유지보수 비중은 작지만, 개발 중 발생한 활동을 강의록의 네 유형으로 분류할 수 있다.
+본 프로젝트는 신규 개발이라 유지보수 비중은 작지만, 개발 중 발생한 활동을 네 유형으로 분류할 수 있다.
 
 | 유형 | 정의 | 본 프로젝트 사례 |
 |---|---|---|
@@ -101,9 +103,9 @@
 
 ---
 
-## 6. 개선점 (정직한 한계 기록)
+## 7. 개선점 (정직한 한계 기록)
 
-- **베이스라인 태깅 부재**: 현재 0 tags. 설계 v0.2, 코드 v1.0 같은 베이스라인을 `git tag`로 명시하면 "이 시점 기준"을 더 분명히 가리킬 수 있다.
-- **역공학/리엔지니어링(11.4·11.5) 해당 없음**: 기존 코드 복원·재구조화 대상이 없다. 다만 AI가 생성한 코드를 사람이 읽어 설계와 대조한 과정은 경량 역공학의 성격을 띤다.
+- **브랜치·PR 미사용**: 본 프로젝트는 단일 main 브랜치에 직접 커밋하는 방식으로 진행했다. 1인이 한 번에 한 작업을 처리하는 단기 프로젝트라 직접 커밋이 비효율적이지는 않았으나, 협업 규모가 커지면 기능별 브랜치(`feature/`, `fix/`)와 Pull Request 기반 검토를 도입해야 변경 격리·리뷰가 체계화된다.
+- **베이스라인 태깅 부재**: 현재 0 tags. 설계 v0.2, 코드 v1.0 같은 베이스라인을 `git tag`로 명시하면 변경의 기준 시점을 더 분명히 가리킬 수 있다.
 
 ---
