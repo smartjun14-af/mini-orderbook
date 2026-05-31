@@ -162,6 +162,22 @@ class TestStateTransition:
         book.cancel_order(order.order_id)
         assert book.get_book()["bids"] == []
 
+    def test_partial_to_filled(self, book):
+        # 상태 다이어그램에서 드러난 전이: 부분체결 → 완전체결
+        resting = book.submit_order(SIDE_SELL, 10200, 10)
+        book.submit_order(SIDE_BUY, 10200, 4)            # 4 체결 → 잔량 6
+        assert resting.status == STATUS_PARTIALLY_FILLED
+        book.submit_order(SIDE_BUY, 10200, 6)            # 잔량 6 마저 체결
+        assert resting.status == STATUS_FILLED
+
+    def test_partial_to_cancelled(self, book):
+        # 상태 다이어그램에서 드러난 전이: 부분체결 → 취소
+        resting = book.submit_order(SIDE_SELL, 10200, 10)
+        book.submit_order(SIDE_BUY, 10200, 4)            # 4 체결 → 잔량 6, 부분체결
+        assert resting.status == STATUS_PARTIALLY_FILLED
+        assert book.cancel_order(resting.order_id) is True
+        assert resting.status == STATUS_CANCELLED
+
 
 # --------------------------------------------------------------------------- #
 # 5. 호가창 조회 — 집계 동작
@@ -220,3 +236,4 @@ class TestIntegration:
         t = Trade(1, 1, 2, 100, 5)
         assert "Order" in repr(o)
         assert "Trade" in repr(t)
+
