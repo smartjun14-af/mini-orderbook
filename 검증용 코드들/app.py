@@ -1,6 +1,6 @@
 """Mini-OrderBook 데모 UI (Streamlit).
 
-docs/DESIGN.md 의 §화면 설계 / UI 설계 원리를 구현한다.
+docs/Design.md 의 화면 설계 / UI 설계 원리를 구현한다.
 설계 → 구현 추적성을 위해 적용한 UI 원리를 주석으로 명시한다.
 
 실행:
@@ -10,7 +10,13 @@ docs/DESIGN.md 의 §화면 설계 / UI 설계 원리를 구현한다.
 import pandas as pd
 import streamlit as st
 
-from orderbook import SIDE_BUY, SIDE_SELL, OrderBook
+from orderbook import (
+    SIDE_BUY,
+    SIDE_SELL,
+    STATUS_FILLED,
+    STATUS_PARTIALLY_FILLED,
+    OrderBook,
+)
 
 # --- 색상 상수: 매수/매도 색상 일관성 (UI 원리: 일관성) ----------------------
 # 도메인(국내 코인 거래소) 관행을 따른다: 매수=빨강, 매도=파랑.
@@ -55,6 +61,7 @@ with st.sidebar:
     side_label = st.radio("구분", ["매수 (BUY)", "매도 (SELL)"], horizontal=True)
     side = SIDE_BUY if side_label.startswith("매수") else SIDE_SELL
 
+    # 엔진이 정수 가격/수량을 받으므로 정수 위젯으로 입력받는다.
     price = st.number_input("가격", min_value=1, value=10000, step=100)
     quantity = st.number_input("수량", min_value=1, value=1, step=1)
 
@@ -71,16 +78,27 @@ with st.sidebar:
             st.session_state.book = OrderBook()
             st.rerun()
 
+    # --- 주문 취소 (FR-07): 제출 시 안내된 주문 번호로 취소 -----------------
+    st.divider()
+    st.subheader("주문 취소")
+    cancel_id = st.number_input("취소할 주문 번호", min_value=1, value=1, step=1)
+    if st.button("취소", use_container_width=True):
+        if book.cancel_order(int(cancel_id)):
+            st.success(f"주문 #{int(cancel_id)} 취소됨")
+        else:
+            st.error(f"주문 #{int(cancel_id)} 없음 (이미 체결/취소되었거나 미존재)")
+        st.rerun()
+
 # --- 주문 처리 + 즉각 피드백 (UI 원리: 가시성, 즉각적 피드백) ---------------
 if submitted:
     try:
-        order = book.submit_order(side, float(price), int(quantity))
-        if order.is_filled():
+        order = book.submit_order(side, int(price), int(quantity))
+        if order.status == STATUS_FILLED:
             st.success(
                 f"주문 #{order.order_id} ({side}) 전량 체결 완료 "
-                f"— {quantity}계약 @ {price:,}"
+                f"— {int(quantity)}계약 @ {int(price):,}"
             )
-        elif order.remaining < order.quantity:
+        elif order.status == STATUS_PARTIALLY_FILLED:
             filled = order.quantity - order.remaining
             st.warning(
                 f"주문 #{order.order_id} ({side}) 부분 체결 "
@@ -89,7 +107,7 @@ if submitted:
         else:
             st.info(
                 f"주문 #{order.order_id} ({side}) 미체결 "
-                f"— {quantity}계약 @ {price:,} 호가창 등록"
+                f"— {int(quantity)}계약 @ {int(price):,} 호가창 등록"
             )
     except ValueError as exc:
         # UI 원리: 오류 메시지는 입력부 근처에서 명확하게
@@ -99,26 +117,20 @@ if submitted:
 # --- 호가창 렌더링 (거래소 관행: 매도 위 / 매수 아래) -----------------------
 def render_orderbook(book: OrderBook) -> None:
     snapshot = book.get_book()
-    asks = snapshot["asks"]
-    bids = snapshot["bids"]
+    asks = snapshot["asks"]  # [(가격, 잔량)] 가격 오름차순
+    bids = snapshot["bids"]  # [(가격, 잔량)] 가격 내림차순
 
-    # 가격대별 잔량 집계
-    def aggregate(orders):
-        agg: dict[float, int] = {}
-        for o in orders:
-            agg[o.price] = agg.get(o.price, 0) + o.remaining
-        return agg
-
-    ask_levels = sorted(aggregate(asks).items(), reverse=True)  # 위에서 높은가
-    bid_levels = sorted(aggregate(bids).items(), reverse=True)  # 높은가 먼저
+    if not asks and not bids:
+        st.info("호가창이 비어 있습니다. 왼쪽에서 주문을 제출하거나 '샘플 주입'을 눌러보세요.")
+        return
 
     rows = []
-    for p, q in ask_levels:
+    for p, q in reversed(asks):  # 높은 매도가 위로
         rows.append(
             f"<tr><td style='color:{COLOR_SELL};text-align:right;padding:2px 12px'>"
             f"{q}</td>"
             f"<td style='color:{COLOR_SELL};font-weight:600;text-align:center;"
-            f"padding:2px 12px'>{p:,.0f}</td>"
+            f"padding:2px 12px'>{p:,}</td>"
             f"<td style='padding:2px 12px'></td></tr>"
         )
     rows.append(
@@ -126,11 +138,11 @@ def render_orderbook(book: OrderBook) -> None:
         "text-align:center;color:#888;font-size:12px;padding:4px'>"
         "── 스프레드 ──</td></tr>"
     )
-    for p, q in bid_levels:
+    for p, q in bids:  # 높은 매수가 위로 (이미 내림차순)
         rows.append(
             f"<tr><td style='padding:2px 12px'></td>"
             f"<td style='color:{COLOR_BUY};font-weight:600;text-align:center;"
-            f"padding:2px 12px'>{p:,.0f}</td>"
+            f"padding:2px 12px'>{p:,}</td>"
             f"<td style='color:{COLOR_BUY};text-align:left;padding:2px 12px'>"
             f"{q}</td></tr>"
         )
@@ -144,10 +156,7 @@ def render_orderbook(book: OrderBook) -> None:
         "<table style='width:100%;border-collapse:collapse;font-size:15px'>"
         f"{header}{''.join(rows)}</table>"
     )
-    if not ask_levels and not bid_levels:
-        st.info("호가창이 비어 있습니다. 왼쪽에서 주문을 제출하거나 '샘플 주입'을 눌러보세요.")
-    else:
-        st.markdown(table, unsafe_allow_html=True)
+    st.markdown(table, unsafe_allow_html=True)
 
 
 # --- 메인 레이아웃 ----------------------------------------------------------
@@ -156,25 +165,8 @@ left, right = st.columns([1, 1])
 with left:
     st.subheader("호가창 (Order Book)")
     render_orderbook(book)
-
-    st.subheader("미체결 주문")
-    snapshot = book.get_book()
-    open_orders = snapshot["bids"] + snapshot["asks"]
-    if open_orders:
-        for o in sorted(open_orders, key=lambda x: x.order_id):
-            label = "매수" if o.side == SIDE_BUY else "매도"
-            color = COLOR_BUY if o.side == SIDE_BUY else COLOR_SELL
-            c1, c2 = st.columns([3, 1])
-            c1.markdown(
-                f"<span style='color:{color};font-weight:600'>#{o.order_id} "
-                f"{label}</span> {o.price:,.0f} × {o.remaining}",
-                unsafe_allow_html=True,
-            )
-            if c2.button("취소", key=f"cancel_{o.order_id}"):
-                book.cancel_order(o.order_id)
-                st.rerun()
-    else:
-        st.caption("미체결 주문이 없습니다.")
+    st.caption("미체결 주문은 위 호가창에 가격대별로 집계되어 표시됩니다. "
+               "취소는 왼쪽 '주문 취소'에서 주문 번호로 할 수 있습니다.")
 
 with right:
     st.subheader("체결 내역 (Trades)")
@@ -186,9 +178,8 @@ with right:
                     "체결#": t.trade_id,
                     "매수주문": t.buy_order_id,
                     "매도주문": t.sell_order_id,
-                    "체결가": f"{t.price:,.0f}",
+                    "체결가": f"{t.price:,}",
                     "수량": t.quantity,
-                    "시각": t.timestamp.strftime("%H:%M:%S"),
                 }
                 for t in trades
             ]
