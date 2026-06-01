@@ -21,9 +21,9 @@ def book():
     return OrderBook()
 
 
-# --------------------------------------------------------------------------- #
+
 # 1. 입력 검증 — 동등 분할 / 경곗값 분석
-# --------------------------------------------------------------------------- #
+
 class TestInputValidation:
 
     def test_invalid_side(self, book):
@@ -59,9 +59,9 @@ class TestInputValidation:
         assert order.status == STATUS_ACCEPTED
 
 
-# --------------------------------------------------------------------------- #
+
 # 2. 체결 로직 — 분기 커버리지
-# --------------------------------------------------------------------------- #
+
 class TestMatching:
 
     def test_no_match_when_price_gap(self, book):
@@ -107,9 +107,9 @@ class TestMatching:
         assert order.status == STATUS_ACCEPTED
 
 
-# --------------------------------------------------------------------------- #
+
 # 3. 우선순위 — 가격 우선 / 시간 우선
-# --------------------------------------------------------------------------- #
+
 class TestPriority:
 
     def test_price_priority_buy_takes_cheapest_ask(self, book):
@@ -134,9 +134,9 @@ class TestPriority:
         assert trade.price == 10300  # 비싼 매수부터 체결
 
 
-# --------------------------------------------------------------------------- #
+
 # 4. 주문 상태 전이 — 상태 기반 테스트
-# --------------------------------------------------------------------------- #
+
 class TestStateTransition:
 
     def test_accepted_to_filled(self, book):
@@ -179,9 +179,9 @@ class TestStateTransition:
         assert resting.status == STATUS_CANCELLED
 
 
-# --------------------------------------------------------------------------- #
+
 # 5. 호가창 조회 — 집계 동작
-# --------------------------------------------------------------------------- #
+
 class TestOrderBookView:
 
     def test_empty_book(self, book):
@@ -207,9 +207,9 @@ class TestOrderBookView:
         assert prices == [10100, 10200, 10300]
 
 
-# --------------------------------------------------------------------------- #
+
 # 6. 통합 시나리오
-# --------------------------------------------------------------------------- #
+
 class TestIntegration:
 
     def test_multi_level_sweep(self, book):
