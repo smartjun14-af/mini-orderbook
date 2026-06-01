@@ -20,7 +20,7 @@ def section(title):
     print("=" * 60)
 
 
-# 1) 테스트 커버리지 -------------------------------------------------
+# 1) 테스트 커버리지
 section("1. 단위 테스트 + 커버리지  (pytest --cov)")
 cov = run([sys.executable, "-m", "pytest", TEST, f"--cov={SRC[:-3]}",
            "--cov-report=term-missing", "-q"])
@@ -29,22 +29,22 @@ for line in cov.splitlines():
     if SRC in line or "TOTAL" in line or "passed" in line:
         print(line)
 
-# 2) 사이클로매틱 복잡도 --------------------------------------------
+# 2) 사이클로매틱 복잡도 
 section("2. 사이클로매틱 복잡도  (radon cc)")
 cc_out = run(["radon", "cc", SRC, "-s", "-a"])
 print(cc_out.strip())
 
-# 3) 유지보수성 지수 -------------------------------------------------
+# 3) 유지보수성 지수 
 section("3. 유지보수성 지수  (radon mi)")
 print(run(["radon", "mi", SRC, "-s"]).strip())
 
-# 4) 코드 줄 수 ------------------------------------------------------
+# 4) 코드 줄 수 
 section("4. 코드 줄 수  (radon raw)")
 for line in run(["radon", "raw", SRC]).splitlines():
     if any(k in line for k in ("LOC", "SLOC", "Comment", "Multi")):
         print(line)
 
-# 5) 정적 분석 -------------------------------------------------------
+# 5) 정적 분석 
 section("5. 정적 분석  (flake8 / pylint)")
 fl = run(["flake8", SRC, "--max-line-length=100", "--count"]).strip()
 print(f"flake8 위반 건수: {fl.splitlines()[-1] if fl else '0'}")
@@ -52,7 +52,7 @@ pl = run(["pylint", SRC, "--disable=R0902,R0913"])
 score = re.search(r"rated at ([\d.]+)/10", pl)
 print(f"pylint 점수: {score.group(1) if score else '?'}/10")
 
-# 6) 객체지향 메트릭 (WMC / CBO) ------------------------------------
+# 6) 객체지향 메트릭 (WMC / CBO) 
 section("6. 객체지향 메트릭 (WMC / CBO)  [radon 복잡도 합산 + AST 참조 분석]")
 cc_map = {}
 for line in cc_out.splitlines():
