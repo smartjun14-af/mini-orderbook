@@ -1,0 +1,109 @@
+# 시장가 주문 — 요구 및 설계 (1단계)
+
+**버전**: 0.1
+**관련 문서**: [SRS.md](./SRS.md), [requirements_model.md](./requirements_model.md), [architecture.md](./architecture.md) (전략 패턴 확장점), [Design.md](./Design.md), [traceability.md](./traceability.md)
+
+---
+
+## 0. 본 문서의 목적과 범위
+
+아키텍처 문서에서 "주문 유형이 늘어나면 전략 패턴으로 매칭 알고리즘을 분리한다"고 **확장점만 언급**해 두었다. 본 문서는 그 확장점을 **시장가 주문**으로 실제 구현하기 위한 1단계로, **요구 정의와 설계까지만** 다룬다. 코드 구현과 테스트는 2단계로 미룬다(프로세스 순서: 요구 → 설계 → 구현 → 테스트).
+
+---
+
+## 1. 새 요구사항
+
+지금까지는 지정가 주문만 있었다. 여기에 시장가 주문을 추가한다.
+
+| ID | 요구 내용 |
+|---|---|
+| FR-09 | **시장가 주문 접수**: 가격을 지정하지 않고, 반대편 호가창의 최우선 가격부터 가격-시간 우선으로 **즉시 체결**한다. (시장가 매수 → 가장 낮은 매도부터, 시장가 매도 → 가장 높은 매수부터) |
+| FR-10 | **시장가 잔량 취소**: 시장가 주문이 전량 체결되지 못하면, 남은 수량은 **호가창에 등록하지 않고 취소**한다. (반대편 호가가 부족하거나 비어 있는 경우 포함) |
+
+체결가 규칙은 기존과 동일하다: 체결가는 호가창에 먼저 있던(수동) 주문의 가격을 따른다. 시장가 주문은 가격이 없으므로, 각 체결은 상대 지정가의 가격으로 이루어진다.
+
+> 설계 결정(토의로 확정): 시장가 잔량은 **취소(소멸)**한다 — 실제 거래소의 표준 시장가 동작이며, 잔량을 지정가로 전환하는 방식보다 규칙이 단순하고 전략 패턴으로 깔끔하게 분리된다.
+
+---
+
+## 2. 유저 스토리
+
+**US-08**: 트레이더로서, 나는 가격을 지정하지 않고 즉시 체결되는 시장가 주문을 내고 싶다. 그래야 지정가가 체결되기를 기다리지 않고 곧바로 매매할 수 있다.
+
+**수락 기준**:
+- 시장가 매수는 매도 호가 중 **가장 낮은 가격부터** 순차 체결된다.
+- 시장가 매도는 매수 호가 중 **가장 높은 가격부터** 순차 체결된다.
+- 반대편 수량이 부족하면 **가능한 만큼만 체결**하고, 남은 수량은 취소된다.
+- 반대편 호가창이 비어 있으면 **0 체결**로 취소된다(오류가 아니라 정상 처리).
+
+---
+
+## 3. 설계 — 전략 패턴 적용
+
+### 3.1 왜 전략 패턴인가
+
+지정가와 시장가는 대부분의 처리(주문 접수, 반대편 순회, 체결 기록, 잔량 차감)가 같지만 두가지가 다르다.:
+
+1. **체결 조건**: 지정가는 가격이 교차할 때만 체결, 시장가는 가격 조건 없이 즉시 체결.
+2. **잔량 처리**: 지정가는 잔량을 호가창에 남기고, 시장가는 잔량을 취소한다.
+
+이 "달라지는 부분"만 알고리즘으로 캡슐화해 갈아끼우는 것이 전략 패턴(Ch.7)이다. 이렇게 하면 `OrderBook`의 핵심 흐름은 건드리지 않고 주문 유형만 추가할 수 있다.
+
+### 3.2 구조
+
+```mermaid
+classDiagram
+    class OrderBook {
+        +submit_order(side, price, qty, order_type)
+        -_match(order, strategy)
+    }
+    class MatchingStrategy {
+        <<interface>>
+        +is_matchable(incoming, best_opposing) bool
+        +rests_remainder() bool
+    }
+    class LimitStrategy {
+        +is_matchable() 가격 교차 시 True
+        +rests_remainder() True
+    }
+    class MarketStrategy {
+        +is_matchable() 반대편 있으면 True
+        +rests_remainder() False
+    }
+    OrderBook ..> MatchingStrategy : 사용
+    MatchingStrategy <|.. LimitStrategy
+    MatchingStrategy <|.. MarketStrategy
+```
+
+- **MatchingStrategy (인터페이스)**: 달라지는 두 가지만 노출한다. `is_matchable`(이 주문이 최우선 반대 호가와 체결되는가)과 `rests_remainder`(잔량을 호가창에 남기는가).
+- **LimitStrategy**: `is_matchable` = 가격 교차(매수가 ≥ 최우선 매도가, 매도가 ≤ 최우선 매수가), `rests_remainder` = True.
+- **MarketStrategy**: `is_matchable` = 반대편 호가가 존재하면 True(가격 무시), `rests_remainder` = False.
+
+### 3.3 기존 코드와의 통합 (무엇이 바뀌나)
+
+- `submit_order`에 `order_type`(기본값=지정가) 인자를 추가하고, 유형에 맞는 전략을 골라 `_match`에 넘긴다.
+- `_match`의 "체결 가능 여부" 판단을 기존 `_is_matchable` 직접 호출에서 **전략의 `is_matchable` 호출**로 바꾼다.
+- 체결 루프가 끝난 뒤 잔량이 남으면: 전략이 `rests_remainder`이면 호가창에 등록, 아니면 잔량을 취소(상태 CANCELLED).
+- 기존 지정가 동작은 `LimitStrategy`가 그대로 재현하므로 **회귀가 없어야 하며**, 이는 2단계에서 기존 단위 테스트 32개로 확인한다.
+
+### 3.4 처리 흐름 (시장가 매수 예시)
+
+1. 시장가 매수 주문 도착(가격 없음, 수량 Q).
+2. 매도 호가창을 최우선(최저가)부터 순회한다.
+3. 각 단계에서 `MarketStrategy.is_matchable` = True(매도가 있으면) → 상대 매도가로 체결하고 잔량을 차감한다.
+4. Q를 다 채우면 종료(전량 체결). 매도가 소진되어 잔량이 남으면, `rests_remainder` = False이므로 잔량을 취소한다.
+
+---
+
+## 4. 추적성 (2단계 선반영)
+
+| FR | US | 테스트 (2단계 예정) | 코드 (2단계 예정) |
+|---|---|---|---|
+| FR-09 | US-08 | 시장가 즉시 체결 / 다단계 체결 테스트 | `MarketStrategy.is_matchable`, `submit_order(order_type)` |
+| FR-10 | US-08 | 시장가 잔량 취소 / 빈 호가창 테스트 | `MarketStrategy.rests_remainder`, `_match` 잔량 처리 |
+
+> SRS와 요구 모델(유스케이스)에도 FR-09·FR-10·US-08을 반영해, 이번 증분이 기존 요구 문서와 일관되게 한다.
+
+---
+
+
