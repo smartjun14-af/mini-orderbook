@@ -56,7 +56,7 @@
 
 ## 3. 통계
 
-![결함 발견 메커니즘 × 심각도](../reports/defect_chart.png)
+![결함 발견 메커니즘 × 심각도](../reports/defect_chart.PNG)
 
 **단계별 결함 수**
 
