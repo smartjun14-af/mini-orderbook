@@ -38,7 +38,7 @@
 | NFR-T-03 | 상태 기반 테스트로 상태 전이 검증 | `TestStateTransition` 7개 (모든 전이, state_diagram.md §3) | 
 | NFR-M-01 | PEP8 준수 | flake8 위반 0건 (static_analysis.md) | 
 | NFR-M-03 | 함수당 사이클로매틱 복잡도 ≤ 10 | 최대 9 (quality.md §3.1) | 
-| NFR-P-01 | 단일 주문 매칭 ≤ 100ms | N=1000에서 0.099ms (benchmark.md) | 
+| NFR-P-01 | 단일 주문 매칭 ≤ 100ms | N=1000에서 0.268ms (benchmark.md) | 
 | NFR-P-02 | 미체결 주문 ≥ 1,000건 보관 | N=5,000까지 정상 동작 (benchmark.md) | 
 
 ---
