@@ -1,17 +1,13 @@
 """Mini-OrderBook 단위/통합 테스트.
 
-테스팅 기법별로 클래스를 구성한다.
-    - 동등 분할 / 경곗값 분석 (블랙박스)
-    - 분기 커버리지 (화이트박스)
-    - 상태 기반 테스트
-    - 통합 시나리오
 """
 
 import pytest
 
 from orderbook import (
-    OrderBook, Order, Trade,
+    OrderBook, Order, Trade, MatchingStrategy,
     SIDE_BUY, SIDE_SELL,
+    ORDER_LIMIT, ORDER_MARKET,
     STATUS_ACCEPTED, STATUS_PARTIALLY_FILLED, STATUS_FILLED, STATUS_CANCELLED,
 )
 
@@ -21,9 +17,9 @@ def book():
     return OrderBook()
 
 
-
+# --------------------------------------------------------------------------- #
 # 1. 입력 검증 — 동등 분할 / 경곗값 분석
-
+# --------------------------------------------------------------------------- #
 class TestInputValidation:
 
     def test_invalid_side(self, book):
@@ -59,9 +55,9 @@ class TestInputValidation:
         assert order.status == STATUS_ACCEPTED
 
 
-
+# --------------------------------------------------------------------------- #
 # 2. 체결 로직 — 분기 커버리지
-
+# --------------------------------------------------------------------------- #
 class TestMatching:
 
     def test_no_match_when_price_gap(self, book):
@@ -107,9 +103,9 @@ class TestMatching:
         assert order.status == STATUS_ACCEPTED
 
 
-
+# --------------------------------------------------------------------------- #
 # 3. 우선순위 — 가격 우선 / 시간 우선
-
+# --------------------------------------------------------------------------- #
 class TestPriority:
 
     def test_price_priority_buy_takes_cheapest_ask(self, book):
@@ -134,9 +130,9 @@ class TestPriority:
         assert trade.price == 10300  # 비싼 매수부터 체결
 
 
-
+# --------------------------------------------------------------------------- #
 # 4. 주문 상태 전이 — 상태 기반 테스트
-
+# --------------------------------------------------------------------------- #
 class TestStateTransition:
 
     def test_accepted_to_filled(self, book):
@@ -179,9 +175,9 @@ class TestStateTransition:
         assert resting.status == STATUS_CANCELLED
 
 
-
+# --------------------------------------------------------------------------- #
 # 5. 호가창 조회 — 집계 동작
-
+# --------------------------------------------------------------------------- #
 class TestOrderBookView:
 
     def test_empty_book(self, book):
@@ -207,9 +203,9 @@ class TestOrderBookView:
         assert prices == [10100, 10200, 10300]
 
 
-
+# --------------------------------------------------------------------------- #
 # 6. 통합 시나리오
-
+# --------------------------------------------------------------------------- #
 class TestIntegration:
 
     def test_multi_level_sweep(self, book):
@@ -237,3 +233,71 @@ class TestIntegration:
         assert "Order" in repr(o)
         assert "Trade" in repr(t)
 
+
+# --------------------------------------------------------------------------- #
+# 7. 시장가 주문 — 전략 패턴 (market order)
+# --------------------------------------------------------------------------- #
+class TestMarketOrder:
+
+    def test_explicit_limit_order_type(self, book):
+        # order_type 을 명시해도 기본(지정가)과 동일하게 동작
+        book.submit_order(SIDE_SELL, 10200, 5)
+        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_LIMIT)
+        assert order.status == STATUS_FILLED
+
+    def test_market_buy_full_fill(self, book):
+        book.submit_order(SIDE_SELL, 10200, 5)
+        order = book.submit_order(SIDE_BUY, None, 5, ORDER_MARKET)
+        assert order.status == STATUS_FILLED
+        assert order.remaining == 0
+        assert book.get_trades()[0].price == 10200      # 체결가는 대기 매도 가격
+
+    def test_market_buy_ignores_price_takes_best(self, book):
+        # 시장가는 가격을 안 보고 최우선(싼) 매도부터 쓸어담는다
+        book.submit_order(SIDE_SELL, 10500, 5)
+        book.submit_order(SIDE_SELL, 10200, 5)
+        order = book.submit_order(SIDE_BUY, None, 10, ORDER_MARKET)
+        assert order.status == STATUS_FILLED
+        trades = book.get_trades()
+        assert trades[0].price == 10200                 # 싼 것부터
+        assert trades[1].price == 10500
+
+    def test_market_buy_partial_then_cancel(self, book):
+        book.submit_order(SIDE_SELL, 10200, 5)
+        order = book.submit_order(SIDE_BUY, None, 8, ORDER_MARKET)  # 5 체결, 3 잔량
+        assert order.remaining == 3
+        assert order.status == STATUS_CANCELLED         # 잔량은 취소(FR-10)
+        assert book.get_book()["bids"] == []            # 호가창에 남지 않음
+        assert len(book.get_trades()) == 1
+
+    def test_market_buy_empty_book_cancelled(self, book):
+        order = book.submit_order(SIDE_BUY, None, 5, ORDER_MARKET)  # 반대편 없음
+        assert order.status == STATUS_CANCELLED
+        assert order.remaining == 5
+        assert book.get_trades() == []
+
+    def test_market_sell_full_fill(self, book):
+        book.submit_order(SIDE_BUY, 10200, 5)
+        order = book.submit_order(SIDE_SELL, None, 5, ORDER_MARKET)
+        assert order.status == STATUS_FILLED
+
+    def test_market_with_price_rejected(self, book):
+        with pytest.raises(ValueError):
+            book.submit_order(SIDE_BUY, 10200, 5, ORDER_MARKET)    # 시장가에 가격 지정
+
+    def test_invalid_order_type(self, book):
+        with pytest.raises(ValueError):
+            book.submit_order(SIDE_BUY, 10200, 5, "STOP")
+
+
+# --------------------------------------------------------------------------- #
+# 8. 매칭 전략 인터페이스 계약
+# --------------------------------------------------------------------------- #
+class TestMatchingStrategy:
+
+    def test_base_strategy_requires_implementation(self):
+        strategy = MatchingStrategy()
+        with pytest.raises(NotImplementedError):
+            strategy.is_matchable(None, None)
+        with pytest.raises(NotImplementedError):
+            strategy.rests_remainder()
