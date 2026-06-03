@@ -1,23 +1,30 @@
 """Mini-OrderBook 매칭 엔진.
 
-단일 종목에 대한 지정가(limit) 주문을 가격-시간 우선(Price-Time Priority)
-원칙으로 매칭하는 메모리 기반 엔진이다.
+단일 종목에 대한 지정가(limit)·시장가(market) 주문을 가격-시간 우선
+(Price-Time Priority) 원칙으로 매칭하는 메모리 기반 엔진이다.
 
 관련 문서:
-    - docs/SRS.md           : 요구사항 명세 (FR-01 ~ FR-08)
-    - docs/Design.md        : UI/상세 설계
-    - docs/architecture.md  : 계층형 아키텍처, 설계 원리
-    - docs/CODING.md        : 코딩 표준(PEP 8), 리팩토링 내역
+    - docs/SRS.md                  : 요구사항 명세 (FR-01 ~ FR-10)
+    - docs/Design.md               : UI/상세 설계
+    - docs/architecture.md         : 계층형 아키텍처, 설계 원리
+    - docs/market_order_design.md  : 시장가 주문 요구·설계(전략 패턴)
+    - docs/CODING.md               : 코딩 표준(PEP 8), 리팩토링 내역
 
 설계 결정 요약:
-    - 체결가는 호가창에 먼저 있던 수동 주문(passive order)의 가격을 따른다.
-    - 부분 체결 시 들어온 주문의 잔량은 자기 가격으로 호가창에 등록된다.
+    - 체결가는 호가창에 "먼저 있던" 수동 주문(passive order)의 가격을 따른다.
+    - 지정가 주문의 미체결 잔량은 자기 가격으로 호가창에 등록된다.
+    - 시장가 주문은 가격 조건 없이 즉시 체결하고, 미체결 잔량은 취소한다.
+    - 지정가/시장가의 차이(체결 조건·잔량 처리)는 전략 패턴으로 분리한다.
     - Trade 는 주문을 객체가 아니라 주문 ID로만 참조한다(약결합).
 """
 
 # 주문 방향 상수
 SIDE_BUY = "BUY"
 SIDE_SELL = "SELL"
+
+# 주문 유형 상수
+ORDER_LIMIT = "LIMIT"
+ORDER_MARKET = "MARKET"
 
 # 주문 상태 상수
 STATUS_ACCEPTED = "ACCEPTED"            # 접수(미체결)
@@ -27,12 +34,12 @@ STATUS_CANCELLED = "CANCELLED"          # 취소됨
 
 
 class Order:
-    """하나의 지정가 주문을 표현하는 데이터 객체.
+    """하나의 주문을 표현하는 데이터 객체.
 
     Attributes:
         order_id (int): 주문 고유 번호.
         side (str): SIDE_BUY 또는 SIDE_SELL.
-        price (int): 지정가.
+        price (int | None): 지정가. 시장가 주문은 None.
         quantity (int): 최초 주문 수량.
         remaining (int): 미체결 잔량.
         seq (int): 접수 순번(시간 우선순위 비교용).
@@ -76,6 +83,55 @@ class Trade:
         )
 
 
+# --------------------------------------------------------------------------- #
+# 매칭 전략 (전략 패턴) — 지정가/시장가의 차이만 캡슐화
+# --------------------------------------------------------------------------- #
+class MatchingStrategy:
+    """주문 유형별 매칭 전략 인터페이스.
+
+    지정가와 시장가는 (1) 체결 조건과 (2) 잔량 처리만 다르다. 이 두 가지를
+    전략으로 캡슐화해, OrderBook 의 핵심 흐름을 바꾸지 않고 주문 유형을
+    추가할 수 있게 한다(전략 패턴, 개방-폐쇄 원칙).
+    """
+
+    def is_matchable(self, incoming, resting):
+        """들어온 주문이 대기 주문과 체결될 수 있는지 판단한다."""
+        raise NotImplementedError
+
+    def rests_remainder(self):
+        """미체결 잔량을 호가창에 남기는지 여부."""
+        raise NotImplementedError
+
+
+class LimitStrategy(MatchingStrategy):
+    """지정가 전략: 가격이 교차할 때만 체결하고, 잔량은 호가창에 남긴다."""
+
+    def is_matchable(self, incoming, resting):
+        if incoming.side == SIDE_BUY:
+            return incoming.price >= resting.price
+        return incoming.price <= resting.price
+
+    def rests_remainder(self):
+        return True
+
+
+class MarketStrategy(MatchingStrategy):
+    """시장가 전략: 가격 조건 없이 즉시 체결하고, 잔량은 취소한다."""
+
+    def is_matchable(self, incoming, resting):  # pylint: disable=unused-argument
+        return True  # 반대편 호가가 있으면 가격을 무시하고 체결
+
+    def rests_remainder(self):
+        return False
+
+
+# 전략은 상태가 없으므로 단일 인스턴스를 재사용한다.
+_STRATEGIES = {
+    ORDER_LIMIT: LimitStrategy(),
+    ORDER_MARKET: MarketStrategy(),
+}
+
+
 class OrderBook:
     """단일 종목 호가창 + 매칭 엔진.
 
@@ -84,7 +140,7 @@ class OrderBook:
     """
 
     def __init__(self):
-        self._bids = []          # 매수 대기 주문 (가격↓ 정렬은 매칭 시 처리)
+        self._bids = []          # 매수 대기 주문
         self._asks = []          # 매도 대기 주문
         self._trades = []        # 체결 내역
         self._next_order_id = 1
@@ -94,22 +150,31 @@ class OrderBook:
     # ------------------------------------------------------------------ #
     # 공개 인터페이스
     # ------------------------------------------------------------------ #
-    def submit_order(self, side, price, quantity):
-        """주문을 접수하고 즉시 매칭한 뒤, 잔량을 호가창에 등록한다.
+    def submit_order(self, side, price, quantity, order_type=ORDER_LIMIT):
+        """주문을 접수하고 즉시 매칭한 뒤, 유형에 따라 잔량을 처리한다.
+
+        지정가(order_type=ORDER_LIMIT)는 잔량을 호가창에 등록하고,
+        시장가(order_type=ORDER_MARKET)는 잔량을 취소한다. 시장가 주문은
+        price 를 지정하지 않는다(None).
 
         Returns:
             Order: 접수된 주문 객체(체결 후 상태가 갱신되어 있음).
         """
-        self._validate_order_input(side, price, quantity)
+        self._validate_order_input(side, price, quantity, order_type)
+        strategy = _STRATEGIES[order_type]
 
         order = Order(self._next_order_id, side, price, quantity, self._next_seq)
         self._next_order_id += 1
         self._next_seq += 1
 
-        self._match(order)
+        self._match(order, strategy)
 
         if order.remaining > 0:
-            self._insert_into_book(order)
+            if strategy.rests_remainder():
+                self._insert_into_book(order)
+            else:
+                # 시장가 잔량은 호가창에 남기지 않고 취소한다(FR-10).
+                order.status = STATUS_CANCELLED
         return order
 
     def cancel_order(self, order_id):
@@ -145,17 +210,25 @@ class OrderBook:
     # ------------------------------------------------------------------ #
     # 내부 헬퍼 (단일 책임으로 분리)
     # ------------------------------------------------------------------ #
-    def _validate_order_input(self, side, price, quantity):
+    def _validate_order_input(self, side, price, quantity, order_type):
         """주문 입력값을 검증한다. 잘못된 값이면 ValueError 를 던진다."""
         if side not in (SIDE_BUY, SIDE_SELL):
             raise ValueError(f"잘못된 주문 방향: {side}")
-        if not isinstance(price, int) or price <= 0:
-            raise ValueError(f"가격은 양의 정수여야 함: {price}")
+        if order_type not in (ORDER_LIMIT, ORDER_MARKET):
+            raise ValueError(f"잘못된 주문 유형: {order_type}")
+        if order_type == ORDER_LIMIT:
+            if not isinstance(price, int) or price <= 0:
+                raise ValueError(f"지정가 주문의 가격은 양의 정수여야 함: {price}")
+        elif price is not None:
+            raise ValueError("시장가 주문은 가격을 지정하지 않는다(None)")
         if not isinstance(quantity, int) or quantity <= 0:
             raise ValueError(f"수량은 양의 정수여야 함: {quantity}")
 
-    def _match(self, order):
-        """들어온 주문을 반대편 호가와 가격-시간 우선으로 체결한다."""
+    def _match(self, order, strategy):
+        """들어온 주문을 반대편 호가와 가격-시간 우선으로 체결한다.
+
+        체결 가능 여부 판단은 전략(strategy)에 위임한다.
+        """
         book = self._asks if order.side == SIDE_BUY else self._bids
         # 반대편을 우선순위 순으로 정렬: 매수면 싼 매도부터, 매도면 비싼 매수부터
         book.sort(key=lambda o: (o.price, o.seq))
@@ -165,7 +238,7 @@ class OrderBook:
         i = 0
         while i < len(book) and order.remaining > 0:
             resting = book[i]
-            if not self._is_matchable(order, resting):
+            if not strategy.is_matchable(order, resting):
                 break
             traded_qty = min(order.remaining, resting.remaining)
             self._record_trade(order, resting, resting.price, traded_qty)
@@ -182,12 +255,6 @@ class OrderBook:
             order.status = STATUS_FILLED
         elif order.remaining < order.quantity:
             order.status = STATUS_PARTIALLY_FILLED
-
-    def _is_matchable(self, incoming, resting):
-        """들어온 주문과 대기 주문의 가격 조건이 맞는지 판단한다."""
-        if incoming.side == SIDE_BUY:
-            return incoming.price >= resting.price
-        return incoming.price <= resting.price
 
     def _record_trade(self, incoming, resting, price, quantity):
         """체결을 Trade 로 기록한다. 체결가는 대기 주문 가격을 따른다."""
