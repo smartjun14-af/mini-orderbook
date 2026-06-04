@@ -1,339 +1,244 @@
 
-
-import pytest
-
-from orderbook import (
-    OrderBook, Order, Trade, MatchingStrategy,
-    SIDE_BUY, SIDE_SELL,
-    ORDER_LIMIT, ORDER_MARKET, ORDER_IOC, ORDER_FOK,
-    STATUS_ACCEPTED, STATUS_PARTIALLY_FILLED, STATUS_FILLED, STATUS_CANCELLED,
-)
+SIDE_BUY = "BUY"
+SIDE_SELL = "SELL"
 
 
-@pytest.fixture
-def book():
-    return OrderBook()
+ORDER_LIMIT = "LIMIT"
+ORDER_MARKET = "MARKET"
+ORDER_IOC = "IOC"      
+ORDER_FOK = "FOK"      
 
 
-class TestInputValidation:
-
-    def test_invalid_side(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order("LONG", 100, 1)
-
-    def test_price_zero_boundary(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_BUY, 0, 1)
-
-    def test_price_negative(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_BUY, -10, 1)
-
-    def test_price_not_int(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_BUY, 100.5, 1)
-
-    def test_quantity_zero_boundary(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_SELL, 100, 0)
-
-    def test_quantity_negative(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_SELL, 100, -5)
-
-    def test_quantity_not_int(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_SELL, 100, 1.5)
-
-    def test_minimum_valid_order(self, book):
-        order = book.submit_order(SIDE_BUY, 1, 1) 
-        assert order.status == STATUS_ACCEPTED
+STATUS_ACCEPTED = "ACCEPTED"            
+STATUS_PARTIALLY_FILLED = "PARTIAL"     
+STATUS_FILLED = "FILLED"                
+STATUS_CANCELLED = "CANCELLED"          
 
 
+class Order:
 
-class TestMatching:
+    def __init__(self, order_id, side, price, quantity, seq):
+        self.order_id = order_id
+        self.side = side
+        self.price = price
+        self.quantity = quantity
+        self.remaining = quantity
+        self.seq = seq
+        self.status = STATUS_ACCEPTED
 
-    def test_no_match_when_price_gap(self, book):
-        book.submit_order(SIDE_SELL, 10300, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5)  
-        assert order.remaining == 5
-        assert order.status == STATUS_ACCEPTED
+    def __repr__(self):
+        return (
+            f"Order(id={self.order_id}, side={self.side}, "
+            f"price={self.price}, remaining={self.remaining}, "
+            f"status={self.status})"
+        )
 
-    def test_full_fill_exact_quantity(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5)
-        assert order.status == STATUS_FILLED
-        assert order.remaining == 0
-        assert len(book.get_trades()) == 1
 
-    def test_execution_price_follows_resting_order(self, book):
-      
-        book.submit_order(SIDE_SELL, 10200, 5)
-        book.submit_order(SIDE_BUY, 10500, 5)
-        trade = book.get_trades()[0]
-        assert trade.price == 10200  
+class Trade:
 
-    def test_partial_fill_incoming_larger(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 8)  
-        assert order.status == STATUS_PARTIALLY_FILLED
-        assert order.remaining == 3
-        assert book.get_book()["bids"] == [(10200, 3)]
+    def __init__(self, trade_id, buy_order_id, sell_order_id, price, quantity):
+        self.trade_id = trade_id
+        self.buy_order_id = buy_order_id
+        self.sell_order_id = sell_order_id
+        self.price = price
+        self.quantity = quantity
 
-    def test_partial_fill_resting_larger(self, book):
-        book.submit_order(SIDE_SELL, 10200, 8)
-        book.submit_order(SIDE_BUY, 10200, 5) 
-        assert book.get_book()["asks"] == [(10200, 3)]
-
-    def test_sell_order_matches_bids(self, book):
-        book.submit_order(SIDE_BUY, 10200, 5)
-        order = book.submit_order(SIDE_SELL, 10200, 5)  
-        assert order.status == STATUS_FILLED
-
-    def test_sell_no_match_when_too_expensive(self, book):
-        book.submit_order(SIDE_BUY, 10100, 5)
-        order = book.submit_order(SIDE_SELL, 10200, 5)  
-        assert order.status == STATUS_ACCEPTED
+    def __repr__(self):
+        return (
+            f"Trade(id={self.trade_id}, buy={self.buy_order_id}, "
+            f"sell={self.sell_order_id}, price={self.price}, qty={self.quantity})"
+        )
 
 
 
-class TestPriority:
+class MatchingStrategy:
 
-    def test_price_priority_buy_takes_cheapest_ask(self, book):
-        book.submit_order(SIDE_SELL, 10300, 5)
-        book.submit_order(SIDE_SELL, 10200, 5)  
-        book.submit_order(SIDE_BUY, 10300, 5)
-        trade = book.get_trades()[0]
-        assert trade.price == 10200  
+    def is_matchable(self, incoming, resting):
+        raise NotImplementedError
 
-    def test_time_priority_same_price(self, book):
-        first = book.submit_order(SIDE_SELL, 10200, 5)  
-        book.submit_order(SIDE_SELL, 10200, 5)           
-        book.submit_order(SIDE_BUY, 10200, 5)
-        trade = book.get_trades()[0]
-        assert trade.sell_order_id == first.order_id    
+    def rests_remainder(self):
+        raise NotImplementedError
 
-    def test_sell_takes_highest_bid_first(self, book):
-        book.submit_order(SIDE_BUY, 10200, 5)
-        book.submit_order(SIDE_BUY, 10300, 5)  
-        book.submit_order(SIDE_SELL, 10200, 5)
-        trade = book.get_trades()[0]
-        assert trade.price == 10300  
+    def requires_full_fill(self):   
+        raise NotImplementedError
 
 
+class LimitStrategy(MatchingStrategy):
 
-class TestStateTransition:
+    def is_matchable(self, incoming, resting):
+        if incoming.side == SIDE_BUY:
+            return incoming.price >= resting.price
+        return incoming.price <= resting.price
 
-    def test_accepted_to_filled(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5)
-        assert order.status == STATUS_FILLED
+    def rests_remainder(self):
+        return True
 
-    def test_accepted_to_partial(self, book):
-        book.submit_order(SIDE_SELL, 10200, 3)
-        order = book.submit_order(SIDE_BUY, 10200, 5)
-        assert order.status == STATUS_PARTIALLY_FILLED
+    def requires_full_fill(self):
+        return False
 
-    def test_accepted_to_cancelled(self, book):
-        order = book.submit_order(SIDE_BUY, 10200, 5)
-        assert book.cancel_order(order.order_id) is True
-        assert order.status == STATUS_CANCELLED
 
-    def test_cancel_nonexistent_returns_false(self, book):
-        assert book.cancel_order(999) is False
+class MarketStrategy(MatchingStrategy):
+   
 
-    def test_cancel_removes_from_book(self, book):
-        order = book.submit_order(SIDE_BUY, 10200, 5)
-        book.cancel_order(order.order_id)
-        assert book.get_book()["bids"] == []
+    def is_matchable(self, incoming, resting): 
+        return True 
 
-    def test_partial_to_filled(self, book):
+    def rests_remainder(self):
+        return False
+
+    def requires_full_fill(self):
+        return False
+
+
+class IOCStrategy(LimitStrategy):
+
+    def rests_remainder(self):
+        return False
+
+
+class FOKStrategy(LimitStrategy):
+    
+
+    def requires_full_fill(self):
+        return True
+
+
+_STRATEGIES = {
+    ORDER_LIMIT: LimitStrategy(),
+    ORDER_MARKET: MarketStrategy(),
+    ORDER_IOC: IOCStrategy(),
+    ORDER_FOK: FOKStrategy(),
+}
+
+
+class OrderBook:
+
+    def __init__(self):
+        self._bids = []          
+        self._asks = []          
+        self._trades = []       
+        self._next_order_id = 1
+        self._next_trade_id = 1
+        self._next_seq = 1
+
+    
+    def submit_order(self, side, price, quantity, order_type=ORDER_LIMIT):
         
-        resting = book.submit_order(SIDE_SELL, 10200, 10)
-        book.submit_order(SIDE_BUY, 10200, 4)            
-        assert resting.status == STATUS_PARTIALLY_FILLED
-        book.submit_order(SIDE_BUY, 10200, 6)            
-        assert resting.status == STATUS_FILLED
+        self._validate_order_input(side, price, quantity, order_type)
+        strategy = _STRATEGIES[order_type]
 
-    def test_partial_to_cancelled(self, book):
-        resting = book.submit_order(SIDE_SELL, 10200, 10)
-        book.submit_order(SIDE_BUY, 10200, 4)            
-        assert resting.status == STATUS_PARTIALLY_FILLED
-        assert book.cancel_order(resting.order_id) is True
-        assert resting.status == STATUS_CANCELLED
+        order = Order(self._next_order_id, side, price, quantity, self._next_seq)
+        self._next_order_id += 1
+        self._next_seq += 1
 
+        if (strategy.requires_full_fill()
+                and self._fillable_quantity(order, strategy) < order.quantity):
+            order.status = STATUS_CANCELLED
+            return order
 
-class TestOrderBookView:
+        self._match(order, strategy)
 
-    def test_empty_book(self, book):
-        assert book.get_book() == {"bids": [], "asks": []}
+        if order.remaining > 0:
+            if strategy.rests_remainder():
+                self._insert_into_book(order)
+            else:
 
-    def test_aggregate_same_price(self, book):
-        book.submit_order(SIDE_BUY, 10200, 5)
-        book.submit_order(SIDE_BUY, 10200, 3)  
-        assert book.get_book()["bids"] == [(10200, 8)]
+                order.status = STATUS_CANCELLED
+        return order
 
-    def test_bids_sorted_high_to_low(self, book):
-        book.submit_order(SIDE_BUY, 10100, 1)
-        book.submit_order(SIDE_BUY, 10300, 1)
-        book.submit_order(SIDE_BUY, 10200, 1)
-        prices = [p for p, _ in book.get_book()["bids"]]
-        assert prices == [10300, 10200, 10100]
+    def cancel_order(self, order_id):
+        
+        for book in (self._bids, self._asks):
+            target = next((o for o in book if o.order_id == order_id), None)
+            if target is not None:
+                book.remove(target)        
+                target.status = STATUS_CANCELLED
+                return True
+        return False
 
-    def test_asks_sorted_low_to_high(self, book):
-        book.submit_order(SIDE_SELL, 10300, 1)
-        book.submit_order(SIDE_SELL, 10100, 1)
-        book.submit_order(SIDE_SELL, 10200, 1)
-        prices = [p for p, _ in book.get_book()["asks"]]
-        assert prices == [10100, 10200, 10300]
+    def get_book(self):
+        return {
+            "bids": self._aggregate(self._bids, reverse=True),
+            "asks": self._aggregate(self._asks, reverse=False),
+        }
 
-class TestIntegration:
+    def get_trades(self):
+        return list(self._trades)
 
-    def test_multi_level_sweep(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        book.submit_order(SIDE_SELL, 10300, 5)
-        order = book.submit_order(SIDE_BUY, 10300, 10)
-        assert order.status == STATUS_FILLED
-        trades = book.get_trades()
-        assert len(trades) == 2
-        assert trades[0].price == 10200  
-        assert trades[1].price == 10300
+   
+    def _validate_order_input(self, side, price, quantity, order_type):
+        if side not in (SIDE_BUY, SIDE_SELL):
+            raise ValueError(f"잘못된 주문 방향: {side}")
+        if order_type not in (ORDER_LIMIT, ORDER_MARKET, ORDER_IOC, ORDER_FOK):
+            raise ValueError(f"잘못된 주문 유형: {order_type}")
+        if order_type == ORDER_MARKET:
+            if price is not None:
+                raise ValueError("시장가 주문은 가격을 지정하지 않는다(None)")
+        elif not isinstance(price, int) or price <= 0:
+            # 지정가·IOC·FOK 는 가격이 필요하다
+            raise ValueError(f"가격은 양의 정수여야 함: {price}")
+        if not isinstance(quantity, int) or quantity <= 0:
+            raise ValueError(f"수량은 양의 정수여야 함: {quantity}")
 
-    def test_partial_sweep_then_rest(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        book.submit_order(SIDE_SELL, 10300, 5)
-        order = book.submit_order(SIDE_BUY, 10300, 12) 
-        assert order.remaining == 2
-        assert book.get_book()["bids"] == [(10300, 2)]
+    def _fillable_quantity(self, order, strategy):
+        book = self._asks if order.side == SIDE_BUY else self._bids
+        book.sort(key=lambda o: (o.price, o.seq))
+        if order.side == SIDE_SELL:
+            book.sort(key=lambda o: (-o.price, o.seq))
+        total = 0
+        for resting in book:
+            if not strategy.is_matchable(order, resting):
+                break
+            total += resting.remaining
+            if total >= order.quantity:
+                break
+        return total
 
-    def test_repr_methods(self):
-        o = Order(1, SIDE_BUY, 100, 5, 1)
-        t = Trade(1, 1, 2, 100, 5)
-        assert "Order" in repr(o)
-        assert "Trade" in repr(t)
+    def _match(self, order, strategy):
+        book = self._asks if order.side == SIDE_BUY else self._bids
+        book.sort(key=lambda o: (o.price, o.seq))
+        if order.side == SIDE_SELL:
+            book.sort(key=lambda o: (-o.price, o.seq))
 
-class TestMarketOrder:
+        i = 0
+        while i < len(book) and order.remaining > 0:
+            resting = book[i]
+            if not strategy.is_matchable(order, resting):
+                break
+            traded_qty = min(order.remaining, resting.remaining)
+            self._record_trade(order, resting, resting.price, traded_qty)
+            order.remaining -= traded_qty
+            resting.remaining -= traded_qty
+            if resting.remaining == 0:
+                resting.status = STATUS_FILLED
+                book.pop(i)
+            else:
+                resting.status = STATUS_PARTIALLY_FILLED
+                i += 1
 
-    def test_explicit_limit_order_type(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_LIMIT)
-        assert order.status == STATUS_FILLED
+        if order.remaining == 0:
+            order.status = STATUS_FILLED
+        elif order.remaining < order.quantity:
+            order.status = STATUS_PARTIALLY_FILLED
 
-    def test_market_buy_full_fill(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, None, 5, ORDER_MARKET)
-        assert order.status == STATUS_FILLED
-        assert order.remaining == 0
-        assert book.get_trades()[0].price == 10200     
+    def _record_trade(self, incoming, resting, price, quantity):
+        if incoming.side == SIDE_BUY:
+            buy_id, sell_id = incoming.order_id, resting.order_id
+        else:
+            buy_id, sell_id = resting.order_id, incoming.order_id
+        trade = Trade(self._next_trade_id, buy_id, sell_id, price, quantity)
+        self._next_trade_id += 1
+        self._trades.append(trade)
 
-    def test_market_buy_ignores_price_takes_best(self, book):
-        book.submit_order(SIDE_SELL, 10500, 5)
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, None, 10, ORDER_MARKET)
-        assert order.status == STATUS_FILLED
-        trades = book.get_trades()
-        assert trades[0].price == 10200                 
-        assert trades[1].price == 10500
+    def _insert_into_book(self, order):
+        if order.side == SIDE_BUY:
+            self._bids.append(order)
+        else:
+            self._asks.append(order)
 
-    def test_market_buy_partial_then_cancel(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, None, 8, ORDER_MARKET)  
-        assert order.remaining == 3
-        assert order.status == STATUS_CANCELLED        
-        assert book.get_book()["bids"] == []            
-        assert len(book.get_trades()) == 1
-
-    def test_market_buy_empty_book_cancelled(self, book):
-        order = book.submit_order(SIDE_BUY, None, 5, ORDER_MARKET)  
-        assert order.status == STATUS_CANCELLED
-        assert order.remaining == 5
-        assert book.get_trades() == []
-
-    def test_market_sell_full_fill(self, book):
-        book.submit_order(SIDE_BUY, 10200, 5)
-        order = book.submit_order(SIDE_SELL, None, 5, ORDER_MARKET)
-        assert order.status == STATUS_FILLED
-
-    def test_market_with_price_rejected(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_BUY, 10200, 5, ORDER_MARKET)    
-
-    def test_invalid_order_type(self, book):
-        with pytest.raises(ValueError):
-            book.submit_order(SIDE_BUY, 10200, 5, "STOP")
-
-
-class TestMatchingStrategy:
-
-    def test_base_strategy_requires_implementation(self):
-        strategy = MatchingStrategy()
-        with pytest.raises(NotImplementedError):
-            strategy.is_matchable(None, None)
-        with pytest.raises(NotImplementedError):
-            strategy.rests_remainder()
-        with pytest.raises(NotImplementedError):
-            strategy.requires_full_fill()
-
-
-
-class TestIOCFOK:
-
-    
-    def test_ioc_full_fill(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_IOC)
-        assert order.status == STATUS_FILLED
-        assert len(book.get_trades()) == 1
-
-    def test_ioc_partial_then_cancel(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 8, ORDER_IOC)  
-        assert order.remaining == 3
-        assert order.status == STATUS_CANCELLED       
-        assert book.get_book()["bids"] == []           
-        assert len(book.get_trades()) == 1
-
-    def test_ioc_no_cross_cancelled(self, book):
-        book.submit_order(SIDE_SELL, 10300, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_IOC)  
-        assert order.status == STATUS_CANCELLED        
-        assert book.get_trades() == []
-        assert book.get_book()["bids"] == []
-
-    
-    def test_fok_full_fill(self, book):
-        book.submit_order(SIDE_SELL, 10200, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_FOK)
-        assert order.status == STATUS_FILLED
-        assert len(book.get_trades()) == 1
-
-    def test_fok_insufficient_cancelled(self, book):
-        book.submit_order(SIDE_SELL, 10200, 3)
-        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_FOK)  
-        assert order.status == STATUS_CANCELLED
-        assert book.get_trades() == []                 
-        assert book.get_book()["asks"] == [(10200, 3)]  
-
-    def test_fok_exact_boundary_multi_level(self, book):
-        book.submit_order(SIDE_SELL, 10200, 3)
-        book.submit_order(SIDE_SELL, 10250, 2)
-        order = book.submit_order(SIDE_BUY, 10300, 5, ORDER_FOK)
-        assert order.status == STATUS_FILLED
-        assert len(book.get_trades()) == 2
-
-    def test_fok_no_cross_cancelled(self, book):
-        book.submit_order(SIDE_SELL, 10300, 5)
-        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_FOK)  
-        assert order.status == STATUS_CANCELLED
-        assert book.get_trades() == []
-
-    def test_fok_empty_book_cancelled(self, book):
-        order = book.submit_order(SIDE_BUY, 10200, 5, ORDER_FOK) 
-        assert order.status == STATUS_CANCELLED
-        assert book.get_trades() == []
-
-    def test_fok_sell_full_fill(self, book):
-        book.submit_order(SIDE_BUY, 10200, 5)
-        order = book.submit_order(SIDE_SELL, 10200, 5, ORDER_FOK)
-        assert order.status == STATUS_FILLED
-        assert len(book.get_trades()) == 1
+    @staticmethod
+    def _aggregate(book, reverse):
+        totals = {}
+        for order in book:
+            totals[order.price] = totals.get(order.price, 0) + order.remaining
+        return sorted(totals.items(), key=lambda x: x[0], reverse=reverse)
