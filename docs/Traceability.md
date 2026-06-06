@@ -1,15 +1,12 @@
 # 추적성 매트릭스 (Traceability Matrix)
 
-**버전**: 0.3
-**관련 문서**: [SRS.md](./SRS.md), [requirements_model.md](./requirements_model.md), [TESTING.md](./TESTING.md), [state_diagram.md](./state_diagram.md), [quality.md](./quality.md)
-
+**버전**: 0.4
+**관련 문서**: [SRS.md](./SRS.md), [requirements_model.md](./requirements_model.md), [quality.md](./quality.md)
 
 ---
 
-## 0. 본 문서의 목적
-
-추적성 매트릭스는 **요구사항이 빠짐없이 코드와 테스트로 이어졌는지**를 표 하나로 확인하는 도구다. SRS의 기능 요구사항(FR) → 유저 스토리(US) → 테스트 → 코드 함수를 한 줄로 연결해, "요구했는데 구현이 없는 항목(고아 요구)"이나 "테스트가 없는 기능(검증 누락)"을 한눈에 잡는다.
-
+## 0. 문서의 목적
+SRS의 기능 요구사항(FR) → 유저 스토리(US) → 테스트 → 코드 함수를 한 줄로 엮어서, 요구는 했는데 구현이 없는 항목(고아 요구)이나 테스트가 없는 기능(검증 누락)을 한눈에 잡아낸다.
 
 ---
 
@@ -27,34 +24,32 @@
 | FR-08 | 이미 체결/취소된 주문 취소 거부 | US-07 | `test_cancel_nonexistent_returns_false` | `cancel_order` (False 반환) |
 | FR-09 | 시장가 주문 즉시 체결(가격 무시, 최우선부터) | US-08 | `test_market_buy_full_fill`, `test_market_buy_ignores_price_takes_best`, `test_market_sell_full_fill`, `test_invalid_order_type` | `submit_order(order_type)`, `MarketStrategy.is_matchable`, `_match` |
 | FR-10 | 시장가 미체결 잔량 취소(호가창에 안 남김) | US-08 | `test_market_buy_partial_then_cancel`, `test_market_buy_empty_book_cancelled`, `test_market_with_price_rejected` | `MarketStrategy.rests_remainder`, `submit_order` (잔량 취소) |
+| FR-11 | IOC 주문: 즉시 체결 가능한 만큼만 체결, 잔량 취소 | US-09 | `test_ioc_full_fill`, `test_ioc_partial_then_cancel`, `test_ioc_no_cross_cancelled` | `IOCStrategy.rests_remainder`, `submit_order` (잔량 취소) |
+| FR-12 | FOK 주문: 전량 체결 가능할 때만 체결, 아니면 전량 취소 | US-10 | `test_fok_full_fill`, `test_fok_insufficient_cancelled`, `test_fok_exact_boundary_multi_level`, `test_fok_no_cross_cancelled`, `test_fok_empty_book_cancelled`, `test_fok_sell_full_fill` | `FOKStrategy.requires_full_fill`, `_fillable_quantity`(사전검사), `submit_order` |
 
-**확인 결과**: 10개 FR 전부 대응하는 코드와 테스트가 존재한다. 구현이 없는 요구(고아 요구)도, 검증이 없는 기능도 없다. → **요구 커버리지 100%** (총 41개 테스트). 시장가 주문(FR-09·FR-10)은 전략 패턴으로 추가되어, 아키텍처에서 잡아 둔 확장점이 실제로 구현되었다.
+**확인 결과**: 12개 FR 전부 짝이 되는 코드와 테스트가 있다. 구현이 없는 요구(고아 요구)도, 검증이 없는 기능도 없다 → **요구 커버리지 100%**(총 50개 테스트). 시장가·IOC·FOK(FR-09~12)는 전략 패턴으로 추가했는데, 아키텍처에서 미리 잡아 둔 확장점이 실제로 쓰인 경우다. 전략 인터페이스 자체의 계약(미구현 메서드 호출 시 예외)은 `test_base_strategy_requires_implementation`으로 검증한다.
 
 ---
 
 ## 2. 주요 비기능 요구사항(NFR) 추적
 
-측정 가능한 NFR이 실제로 충족됐는지 증거 문서와 연결한다.
+측정 가능한 NFR이 실제로 충족됐는지 증거 문서와 연결했다.
 
-| NFR | 기준 | 측정/증거 | 
-|---|---|---|---|
-| NFR-T-01 | 코어 단위 테스트 커버리지 ≥ 80% | 100% (quality.md §3.1) | 
-| NFR-T-03 | 상태 기반 테스트로 상태 전이 검증 | `TestStateTransition` 7개 (모든 전이, state_diagram.md §3) | 
-| NFR-M-01 | PEP8 준수 | flake8 위반 0건 (static_analysis.md) | 
-| NFR-M-03 | 함수당 사이클로매틱 복잡도 ≤ 10 | 최대 9 (`_match`·`_validate_order_input`, quality.md §3.1) | 
-| NFR-P-01 | 단일 주문 매칭 ≤ 100ms | N=1000에서 0.268ms (benchmark.md) | 
-| NFR-P-02 | 미체결 주문 ≥ 1,000건 보관 | N=5,000까지 정상 동작 (benchmark.md) | 
-
----
-
-## 3. 명세-구현 차이 (추적성으로 드러난 점)
-
-추적성 매트릭스의 본래 목적이 "명세와 구현의 어긋남을 찾는 것"이므로, 점검 중 발견한 차이를 솔직히 기록한다.
-
-1. **주문 ID 형식**: SRS 수락 기준은 UUID를 명시하나, 본 구현은 **순번 정수**를 쓴다. 이는 단점이 아니라, 정수 순번이 시간 우선순위(`seq`) 계산을 겸할 수 있어 단일 사용자 시뮬레이터에 더 단순하기 때문에 택한 설계다. 다만 SRS 문구와는 다르므로, 추후 SRS를 "고유 ID(순번 또는 UUID)"로 완화하거나 구현을 UUID로 바꿔 일치시킨다.
-2. **가격·수량 자료형**: SRS는 "정수 또는 소수"를 허용하나, 본 구현은 **정수만** 허용한다. 호가 단위가 정수인 단순화 가정에 따른 것이며, 소수 호가가 필요해지면 검증 함수만 확장하면 된다.
-
-> 한편 초기 점검에서 드러났던 "상태(status) 명세-구현 차이"(SRS는 PARTIALLY_FILLED·CANCELLED를 명시하나 구현에 상태 필드 없음)는, 엔진 정비 시 Order에 `status` 필드를 추가하고 `TestStateTransition`으로 검증함으로써 해소되었다. 즉 추적성 점검이 차이를 짚고, 그 차이를 실제로 메운 사례다.
+| NFR | 기준 | 측정/증거 |
+|---|---|---|
+| NFR-T-01 | 코어 단위 테스트 커버리지 ≥ 70% | 100% (quality.md §3.1) |
+| NFR-T-03 | 상태 기반 테스트로 상태 전이 검증 | `TestStateTransition` 7개 (모든 전이, state_diagram.md §3) |
+| NFR-M-01 | PEP8 준수 | flake8 위반 0건 (정적 분석 문서) |
+| NFR-M-03 | 함수당 사이클로매틱 복잡도 ≤ 10 | 최대 9 (`_match`·`_validate_order_input`, quality.md §3.1) |
+| NFR-P-01 | 단일 주문 매칭 ≤ 100ms | N=1000에서 0.268ms (benchmark.md) |
+| NFR-P-02 | 미체결 주문 ≥ 1,000건 보관 | N=5,000까지 정상 동작 (benchmark.md) |
 
 ---
+
+## 3. 명세-구현 차이 (추적성으로 드러난 점을 기술한다.)
+
+추적성 매트릭스의 원래 목적이 "명세와 구현이 어긋난 데를 찾는 것"이라, 점검하다 발견한 차이를 적어 둔다.
+
+1. **주문 ID 형식**: SRS 수락 기준은 UUID를 명시하지만, 구현은 **순번 정수**를 쓴다. 단점이라기보다, 정수 순번이 시간 우선순위(`seq`) 계산까지 겸할 수 있어서 단일 사용자 시뮬레이터엔 더 단순하기 때문에 택한 설계다. 다만 SRS 문구와는 다르니, 추후 SRS를 "고유 ID(순번 또는 UUID)"로 완화하거나 구현을 UUID로 바꿔 맞추면 된다.
+2. **가격·수량 자료형**: SRS는 "정수 또는 소수"를 허용하지만, 구현은 **정수만** 받는다. 호가 단위가 정수라는 단순화 가정에 따른 것이고, 소수 호가가 필요해지면 검증 함수만 손보면 된다.
 
