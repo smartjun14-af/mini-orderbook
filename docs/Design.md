@@ -1,4 +1,6 @@
 
+# Mini-OrderBook 상세 설계 (UI · 클래스 · 시퀀스)
+
 **관련 문서**: [SRS.md](./SRS.md)
 
 ## 1. 사용자 분석
@@ -8,7 +10,7 @@
 | 학습형 (Primary) | 중급 (Python, REST API 경험) | 매칭 엔진·호가창 원리 학습 | 빠른 피드백, 결과 시각화 |
 | 평가자 (Secondary) | 고급 | SW 공학 프로세스 적용 평가 |
 
-학습형 사용자는 **초보자가 아니지만 거래소 도메인은 친숙하지 않을 수 있으므로**, 멘탈 모델은 "엑셀의 표에 주문 행이 쌓이고, 조건이 맞으면 두 행이 사라지면서 체결 기록이 생긴다"는 수준의 단순한 비유로 잡는다.
+학습형 사용자는 초보는 아니지만 거래소 도메인은 낯설 수 있어서, 멘탈 모델은 "엑셀 표에 주문 행이 쌓이고, 조건이 맞으면 두 행이 사라지면서 체결 기록이 생긴다" 정도의 단순한 비유로 잡았다.
 
 ---
 
@@ -29,7 +31,7 @@ T3. 주문 취소 흐름
         → [Cancel] → [호가창에서 제거 확인]
 ```
 
-위 흐름에서 정보 흐름의 핵심 단위는 **(입력 폼) → (엔진 처리) → (호가창 + 체결내역 동시 갱신)**. 
+정보 흐름은 **(입력 폼) → (엔진 처리) → (호가창 + 체결내역 동시 갱신)**이다.
 
 ---
 
@@ -51,6 +53,7 @@ T3. 주문 취소 흐름
 | 데이터 | UI 요소 |
 |---|---|---|
 | 매수/매도 구분 | **라디오 버튼** | 
+| 주문 유형(지정가/시장가/IOC/FOK) | **선택 박스 (selectbox)** | 
 | 가격(Price) | **텍스트 박스** (number input) |
 | 수량(Quantity) | **텍스트 박스** (number input) | 
 | 주문 제출 | **명령 버튼** ("Submit") | 
@@ -101,39 +104,54 @@ classDiagram
     class Order {
         +int order_id
         +str side
-        +float price
+        +int price
         +int quantity
         +int remaining
-        +datetime timestamp
-        +is_filled() bool
+        +int seq
+        +str status
     }
 
     class Trade {
         +int trade_id
         +int buy_order_id
         +int sell_order_id
-        +float price
+        +int price
         +int quantity
-        +datetime timestamp
     }
 
+    class MatchingStrategy {
+        <<interface>>
+        +is_matchable() bool
+        +rests_remainder() bool
+        +requires_full_fill() bool
+    }
+    class LimitStrategy
+    class MarketStrategy
+    class IOCStrategy
+    class FOKStrategy
+
     class OrderBook {
-        -list bids
-        -list asks
-        -list trades
-        -int next_order_id
-        -int next_trade_id
-        +submit_order(side, price, quantity) Order
+        -list _bids
+        -list _asks
+        -list _trades
+        +submit_order(side, price, quantity, order_type) Order
         +cancel_order(order_id) bool
         +get_book() dict
         +get_trades() list
         -_match() void
     }
 
+    MatchingStrategy <|-- LimitStrategy
+    MatchingStrategy <|-- MarketStrategy
+    LimitStrategy <|-- IOCStrategy
+    LimitStrategy <|-- FOKStrategy
     OrderBook "1" --> "*" Order : manages
     OrderBook "1" --> "*" Trade : produces
+    OrderBook --> MatchingStrategy : uses
     Trade "*" --> "2" Order : references
 ```
+
+> 주문 유형(지정가·시장가·IOC·FOK)별 매칭 규칙은 각각의 전략 클래스가 맡고, `OrderBook`은 유형에 맞는 전략을 골라 위임만 한다. 전략 패턴을 쓴 이유는 architecture.md §6.2에 있다.
 
 ---
 
@@ -183,7 +201,7 @@ sequenceDiagram
 - `OrderBook.asks`: `List[Order]`, 가격 오름차순 + 시간 오름차순
 - `OrderBook.trades`: `List[Trade]`, 시간 오름차순
 
-향후 확장 시 SQLite로 영속화 가능 (SRS §1.2 Out-of-Scope).
+나중에 확장하면 SQLite로 영속화할 수 있다 (SRS §1.2 Out-of-Scope).
 
 ---
 
@@ -206,4 +224,6 @@ sequenceDiagram
 
 ## 10. 추후 확장 (Out-of-Scope)
 
-시장가 주문, 다종목, 사용자 인증, DB 영속성, 실시간 차트 — 모두 SRS §1.2 참고.
+다종목 거래, 사용자 인증, DB 영속성, 실시간 차트 — 모두 SRS §1.2 참고.
+
+(시장가·IOC·FOK 주문은 처음엔 범위 밖이었지만 이후 요구로 추가돼 현재 구현돼 있다. 전략 패턴 적용 근거는 architecture.md §6.2 참조.)
